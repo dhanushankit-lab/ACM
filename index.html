@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>2D Pong Game</title>
+  <style>
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #121212;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+      user-select: none;
+    }
+    canvas {
+      background-color: #0a0a0a;
+      border: 3px solid #2e2e2e;
+      border-radius: 4px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+      display: block;
+    }
+    .controls-hint {
+      margin-top: 18px;
+      font-size: 14px;
+      color: #888888;
+      letter-spacing: 0.5px;
+      text-align: center;
+    }
+    .controls-hint kbd {
+      background: #222222;
+      border: 1px solid #444444;
+      border-radius: 3px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      color: #ffffff;
+      display: inline-block;
+      font-family: monospace;
+      font-size: 13px;
+      margin: 0 2px;
+      padding: 2px 7px;
+    }
+  </style>
+</head>
+<body>
+
+  <canvas id="gameCanvas" width="800" height="500"></canvas>
+  <div class="controls-hint">
+    Controls: <kbd>W</kbd> / <kbd>S</kbd> or <kbd>&uparrow;</kbd> / <kbd>&downarrow;</kbd> to move paddle
+  </div>
+
+  <script>
+
+    const CANVAS_WIDTH = 800;
+    const CANVAS_HEIGHT = 500;
+
+    const PADDLE_WIDTH = 14;
+    const PADDLE_HEIGHT = 90;
+    const PADDLE_OFFSET = 30; 
+    const PLAYER_SPEED = 7;
+
+    const AI_SPEED = 5.2; 
+    const AI_DEAD_ZONE = 10; 
+
+    const BALL_RADIUS = 8;
+    const BALL_INITIAL_SPEED = 7;
+    const BALL_MAX_SPEED = 13;
+    const BALL_SPEED_INCREMENT = 1.05; 
+    const MAX_BOUNCE_ANGLE = (60 * Math.PI) / 180; 
+
+    const SERVE_DELAY_FRAMES = 60; 
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const player = {
+      x: PADDLE_OFFSET,
+      y: (CANVAS_HEIGHT - PADDLE_HEIGHT) / 2,
+      width: PADDLE_WIDTH,
+      height: PADDLE_HEIGHT,
+      score: 0
+    };
+
+    const ai = {
+      x: CANVAS_WIDTH - PADDLE_OFFSET - PADDLE_WIDTH,
+      y: (CANVAS_HEIGHT - PADDLE_HEIGHT) / 2,
+      width: PADDLE_WIDTH,
+      height: PADDLE_HEIGHT,
+      score: 0
+    };
+
+    const ball = {
+      x: CANVAS_WIDTH / 2,
+      y: CANVAS_HEIGHT / 2,
+      radius: BALL_RADIUS,
+      dx: 0,
+      dy: 0,
+      speed: BALL_INITIAL_SPEED
+    };
+
+    let serveCountdown = SERVE_DELAY_FRAMES;
+    let nextServeDir = -1; 
+    let nextServeDy = 0;
+
+    function clamp(val, min, max) {
+      return Math.max(min, Math.min(max, val));
+    }
+
+    function circleRectCollision(circle, rect) {
+      const closestX = clamp(circle.x, rect.x, rect.x + rect.width);
+      const closestY = clamp(circle.y, rect.y, rect.y + rect.height);
+      const distX = circle.x - closestX;
+      const distY = circle.y - closestY;
+      const distanceSquared = distX * distX + distY * distY;
+      return {
+        collided: distanceSquared <= circle.radius * circle.radius,
+        closestX,
+        closestY
+      };
+    }
+
+    function resetBall(scorer) {
+      ball.x = CANVAS_WIDTH / 2;
+      ball.y = CANVAS_HEIGHT / 2;
+      ball.dx = 0;
+      ball.dy = 0;
+      ball.speed = BALL_INITIAL_SPEED;
+
+      
+      nextServeDir = scorer === 'ai' ? 1 : -1;
+
+      const serveAngle = (Math.random() * 60 - 30) * (Math.PI / 180);
+      nextServeDy = BALL_INITIAL_SPEED * Math.sin(serveAngle);
+
+      serveCountdown = SERVE_DELAY_FRAMES;
+    }
+
+    const keys = {};
+
+    window.addEventListener('keydown', (e) => {
+      keys[e.key.toLowerCase()] = true;
+      keys[e.code] = true;
+      
+      if (e.code === 'ArrowUp' || e.code === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      keys[e.key.toLowerCase()] = false;
+      keys[e.code] = false;
+    });
+
+    window.addEventListener('blur', () => {
+      for (const k in keys) {
+        keys[k] = false;
+      }
+    });
+
+    function update() {
+      
+      const moveUp = keys['w'] || keys['keyw'] || keys['arrowup'];
+      const moveDown = keys['s'] || keys['keys'] || keys['arrowdown'];
+
+      if (moveUp && !moveDown) {
+        player.y -= PLAYER_SPEED;
+      } else if (moveDown && !moveUp) {
+        player.y += PLAYER_SPEED;
+      }
+      player.y = clamp(player.y, 0, CANVAS_HEIGHT - player.height);
+
+      
+      if (serveCountdown > 0) {
+        serveCountdown--;
+        if (serveCountdown === 0) {
+          ball.dx = nextServeDir * Math.sqrt(Math.max(0, ball.speed * ball.speed - nextServeDy * nextServeDy));
+          ball.dy = nextServeDy;
+        }
+      }
+
+      
+      if (serveCountdown === 0) {
+        ball.x += ball.dx;
+        ball.y += ball.dy;
+
+        
+        if (ball.y - ball.radius <= 0) {
+          ball.y = ball.radius;
+          ball.dy = -ball.dy;
+        } else if (ball.y + ball.radius >= CANVAS_HEIGHT) {
+          ball.y = CANVAS_HEIGHT - ball.radius;
+          ball.dy = -ball.dy;
+        }
+      }
+
+      
+      const aiCenter = ai.y + ai.height / 2;
+      const aiDiff = ball.y - aiCenter;
+      if (Math.abs(aiDiff) > AI_DEAD_ZONE) {
+        if (aiDiff > 0) {
+          ai.y += Math.min(AI_SPEED, aiDiff);
+        } else {
+          ai.y -= Math.min(AI_SPEED, -aiDiff);
+        }
+      }
+      ai.y = clamp(ai.y, 0, CANVAS_HEIGHT - ai.height);
+
+      
+      const playerHit = circleRectCollision(ball, player);
+      
+      if (playerHit.collided && ball.dx < 0 && ball.x >= player.x) {
+        
+        ball.x = player.x + player.width + ball.radius;
+
+        
+        const hitOffset = clamp((ball.y - (player.y + player.height / 2)) / (player.height / 2), -1, 1);
+        const bounceAngle = hitOffset * MAX_BOUNCE_ANGLE;
+
+        
+        const currentSpeed = Math.hypot(ball.dx, ball.dy);
+        const newSpeed = Math.min(currentSpeed * BALL_SPEED_INCREMENT, BALL_MAX_SPEED);
+
+        ball.dx = newSpeed * Math.cos(bounceAngle);
+        ball.dy = newSpeed * Math.sin(bounceAngle);
+      }
+
+      
+      const aiHit = circleRectCollision(ball, ai);
+      
+      if (aiHit.collided && ball.dx > 0 && ball.x <= ai.x + ai.width) {
+       
+        ball.x = ai.x - ball.radius;
+
+        
+        const hitOffset = clamp((ball.y - (ai.y + ai.height / 2)) / (ai.height / 2), -1, 1);
+        const bounceAngle = hitOffset * MAX_BOUNCE_ANGLE;
+
+        
+        const currentSpeed = Math.hypot(ball.dx, ball.dy);
+        const newSpeed = Math.min(currentSpeed * BALL_SPEED_INCREMENT, BALL_MAX_SPEED);
+
+        ball.dx = -newSpeed * Math.cos(bounceAngle);
+        ball.dy = newSpeed * Math.sin(bounceAngle);
+      }
+
+      
+      if (ball.x + ball.radius < 0) {
+        
+        ai.score++;
+        resetBall('ai');
+      } else if (ball.x - ball.radius > CANVAS_WIDTH) {
+        
+        player.score++;
+        resetBall('player');
+      }
+    }
+
+    
+    function draw() {
+      
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+      // Dashed center line
+      ctx.strokeStyle = '#2e2e2e';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([12, 12]);
+      ctx.beginPath();
+      ctx.moveTo(CANVAS_WIDTH / 2, 0);
+      ctx.lineTo(CANVAS_WIDTH / 2, CANVAS_HEIGHT);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 54px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(player.score.toString(), CANVAS_WIDTH / 4, 30);
+      ctx.fillText(ai.score.toString(), (3 * CANVAS_WIDTH) / 4, 30);
+
+      
+      ctx.fillRect(player.x, player.y, player.width, player.height);
+      ctx.fillRect(ai.x, ai.y, ai.width, ai.height);
+
+      
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      
+      if (serveCountdown > 0) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.font = 'bold 20px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('READY', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2 - 35);
+      }
+    }
+
+    
+    function gameLoop() {
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    
+    resetBall('player');
+    requestAnimationFrame(gameLoop);
+  </script>
+</body>
+</html>
